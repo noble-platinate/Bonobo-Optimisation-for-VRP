@@ -1,5 +1,5 @@
 params:
-  capacity 400
+  capacity 500
 nodes:
   node01		6.911		1.741		1.844
   node02		31.576		1.350		6.640
