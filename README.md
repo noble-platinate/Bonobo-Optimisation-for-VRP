@@ -1,7 +1,3 @@
-Here is a draft for the README file for your GitHub repository, along with the inclusion of the PDF for reference:
-
----
-
 # Bonobo Optimization for Vehicle Routing Problem (VRP)
 
 This repository implements the Bonobo Optimizer (BO), a novel metaheuristic algorithm inspired by the social behaviors and mating strategies of bonobos, for solving the Vehicle Routing Problem (VRP) with capacity constraints. A comparative analysis with the Genetic Algorithm (GA) is also provided to evaluate the performance of BO in optimizing delivery routes.
