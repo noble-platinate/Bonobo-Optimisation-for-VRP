@@ -82,17 +82,77 @@ def distance(n1, n2):
     dy = n2['posY'] - n1['posY']
     return math.sqrt(dx * dx + dy * dy)
 
-def fitness(p):
-    # The first distance is from depot to the first node of the first route
-    s = distance(vrp['nodes'][0], vrp['nodes'][p[0]])
-    # Then calculating the distances between the nodes
+# Helper function to check constraint violations
+def constraint_violation(p):
+    violations = {'duplicates': 0, 'capacity': 0, 'consecutive_depots': 0}
+    
+    visited = set()
+    total_demand = 0
+    consecutive_depot_count = 0
+    
+    for node in p:
+        if node != 0:
+            if node in visited:
+                violations['duplicates'] += 1
+            visited.add(node)
+            total_demand += vrp['nodes'][node]['demand']
+            if total_demand > vrp['capacity']:
+                violations['capacity'] += total_demand - vrp['capacity']
+        else:
+            if consecutive_depot_count > 0:
+                violations['consecutive_depots'] += 1
+            consecutive_depot_count += 1
+            total_demand = 0
+    
+    return violations
+
+# Static Penalty Function
+def static_penalty(p, C=1000):
+    violations = constraint_violation(p)
+    penalty = C * (violations['duplicates'] ** 2 + violations['capacity'] ** 2 + violations['consecutive_depots'] ** 2)
+    return penalty
+
+# Dynamic Penalty Function
+def dynamic_penalty(p, C=1000, alpha=2, generation=1):
+    violations = constraint_violation(p)
+    penalty = (C * (generation ** alpha)) * (violations['duplicates'] ** 2 + violations['capacity'] ** 2 + violations['consecutive_depots'] ** 2)
+    return penalty
+
+# Adaptive Penalty Function
+def adaptive_penalty(p, C=1000, lambda_t=1, case1=True):
+    violations = constraint_violation(p)
+    beta1 = 1.5
+    beta2 = 2.0
+    
+    # Update lambda based on feedback
+    if case1:
+        lambda_t = lambda_t / beta1
+    else:
+        lambda_t = lambda_t * beta2
+
+    penalty = lambda_t * C * (violations['duplicates'] ** 2 + violations['capacity'] ** 2 + violations['consecutive_depots'] ** 2)
+    return penalty, lambda_t
+
+# Adjust fitness function to include penalty
+def fitness_with_penalty(p, C=1000, penalty_type="static", generation=1, lambda_t=1, case1=True):
+    # Calculate the basic fitness (distance)
+    basic_fitness = distance(vrp['nodes'][0], vrp['nodes'][p[0]])
     for i in range(len(p) - 1):
         prev = vrp['nodes'][p[i]]
         next = vrp['nodes'][p[i + 1]]
-        s += distance(prev, next)
-    # The last distance is from the last node of the last route to the depot
-    s += distance(vrp['nodes'][p[-1]], vrp['nodes'][0])
-    return s
+        basic_fitness += distance(prev, next)
+    basic_fitness += distance(vrp['nodes'][p[-1]], vrp['nodes'][0])
+
+    return basic_fitness, lambda_t
+    # Apply penalty based on the penalty type
+    # if penalty_type == "static":
+    #     penalty = static_penalty(p, C)
+    # elif penalty_type == "dynamic":
+    #     penalty = dynamic_penalty(p, C, generation=generation)
+    # elif penalty_type == "adaptive":
+    #     penalty, lambda_t = adaptive_penalty(p, C, lambda_t, case1)
+    
+    # return basic_fitness + penalty, lambda_t
 
 def adjust(p):
     # Adjust repeated
@@ -130,8 +190,9 @@ def adjust(p):
             del p[i]
         i -= 1
 
-def bonobo_algorithm(popsize, iterations, pd, pf, pgsm):
+def bonobo_algorithm(popsize, iterations, pd, pf, pgsm, penalty_type="static"):
     pop = []
+    lambda_t = 1
 
     # Generating random initial population
     for i in range(popsize):
@@ -142,8 +203,8 @@ def bonobo_algorithm(popsize, iterations, pd, pf, pgsm):
         adjust(p)
 
     # Initialize the alpha bonobo (best solution found so far)
-    best_solution = min(pop, key=fitness)
-    best_fitness = fitness(best_solution)
+    best_solution = min(pop, key=lambda x: fitness_with_penalty(x, penalty_type=penalty_type)[0])
+    best_fitness, lambda_t = fitness_with_penalty(best_solution, penalty_type=penalty_type)
 
     # Running the Bonobo Optimization Algorithm
     for iteration in range(iterations):
@@ -174,11 +235,12 @@ def bonobo_algorithm(popsize, iterations, pd, pf, pgsm):
                     adjust(new_bonobo)
 
                     # Accept the new solution if it's better
-                    if fitness(new_bonobo) < fitness(bonobo_p):
+                    new_fitness, lambda_t = fitness_with_penalty(new_bonobo, penalty_type=penalty_type, generation=iteration, lambda_t=lambda_t)
+                    if new_fitness < fitness_with_penalty(bonobo_p, penalty_type=penalty_type, generation=iteration)[0]:
                         pop[i] = new_bonobo
-                        if fitness(new_bonobo) < best_fitness:
+                        if new_fitness < best_fitness:
                             best_solution = new_bonobo
-                            best_fitness = fitness(best_solution)
+                            best_fitness = new_fitness
 
             else:
                 # Flag = 0 (perform random exploration)
@@ -187,47 +249,43 @@ def bonobo_algorithm(popsize, iterations, pd, pf, pgsm):
                 adjust(new_bonobo)
 
                 # Accept the new solution if it's better
-                if fitness(new_bonobo) < fitness(bonobo_p):
+                new_fitness, lambda_t = fitness_with_penalty(new_bonobo, penalty_type=penalty_type, generation=iteration, lambda_t=lambda_t)
+                if new_fitness < fitness_with_penalty(bonobo_p, penalty_type=penalty_type, generation=iteration)[0]:
                     pop[i] = new_bonobo
-                    if fitness(new_bonobo) < best_fitness:
+                    if new_fitness < best_fitness:
                         best_solution = new_bonobo
-                        best_fitness = fitness(best_solution)
+                        best_fitness = new_fitness
 
-        # Update parameters if needed
-        # (In this simplified implementation, we assume no dynamic updates)
-
+        current_best_fitness = float('inf')
+        for p in pop:
+            f, lambda_t = fitness_with_penalty(p, penalty_type=penalty_type, generation=iteration)
+            if f < current_best_fitness:
+                current_best_fitness = f
+        
+        print(f"{current_best_fitness:.6f}")
     return best_solution, best_fitness
 
 # Helper functions to create new bonobos based on the pseudocode
 def create_new_bonobo_2(bonobo_p, j):
-    # Implement the logic for Eq. (2) here
     new_bonobo = bonobo_p[:]
-    # Randomly swap two nodes as a basic operation
     idx1, idx2 = random.sample(range(len(new_bonobo)), 2)
     new_bonobo[idx1], new_bonobo[idx2] = new_bonobo[idx2], new_bonobo[idx1]
     return new_bonobo
 
 def create_new_bonobo_3_or_5(bonobo_p, j, best_solution):
-    # Implement the logic for Eqs. (3) and (5) here
     new_bonobo = bonobo_p[:]
-    # Make sure j is within bounds of best_solution
     if j < len(best_solution):
         new_bonobo[j] = best_solution[j]
     return new_bonobo
 
 def create_new_bonobo_4_or_6(bonobo_p, j, best_solution):
-    # Implement the logic for Eqs. (4) and (6) here
     new_bonobo = bonobo_p[:]
-    # Implement the logic specific to (4) and (6)
-    # This is usually a mutation that is slightly different from (3) and (5)
     if j < len(best_solution):
         new_bonobo[j] = random.choice(best_solution)
     return new_bonobo
 
 def create_new_bonobo_9(bonobo_p):
-    # Implement the logic for Eq. (9) here
     new_bonobo = bonobo_p[:]
-    # Randomly mutate the solution
     idx1, idx2 = random.sample(range(len(new_bonobo)), 2)
     new_bonobo[idx1], new_bonobo[idx2] = new_bonobo[idx2], new_bonobo[idx1]
     return new_bonobo
@@ -235,12 +293,13 @@ def create_new_bonobo_9(bonobo_p):
 # Parameters
 popsize = int(sys.argv[1])
 iterations = int(sys.argv[2])
-pd = 0.5  # Example parameter, probability of dispersal
-pf = 0.7  # Example parameter, probability of fission-fusion
-pgsm = 0.9  # Example parameter, maximum social group size
+pd = float(sys.argv[3])  # Example parameter, probability of dispersal
+pf = float(sys.argv[4])  # Example parameter, probability of fission-fusion
+pgsm = float(sys.argv[5])  # Example parameter, maximum social group size
+penalty_type = sys.argv[6]  # static, dynamic, or adaptive
 
 # Run the Bonobo Algorithm
-best_solution, best_fitness = bonobo_algorithm(popsize, iterations, pd, pf, pgsm)
+best_solution, best_fitness = bonobo_algorithm(popsize, iterations, pd, pf, pgsm, penalty_type)
 
 # Printing the solution
 print("0")
